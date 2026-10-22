@@ -162,6 +162,33 @@ const WEIGHT = {
   wolf: 1.2, glitch: 1.2, disco: 1.2,                                                              // 아주 드문 양
 };
 const calm = () => (Math.random() < 0.55 ? 'classic' : pick(CALM));
+const NAMES = {
+  classic: '정석 양', coward: '겁쟁이 양', sleepy: '졸린 양', shaved: '털 깎인 양', big: '털 안 깎은 양',
+  rebel: '반항아 양', pole: '장대높이뛰기 양', selfie: '셀카 양', math: '수학자 양', train: '기차 양',
+  ghost: '유령 양', cloud: '구름 양', wolf: '양 탈 쓴 늑대', glitch: '고장난 양',
+  stripe: '줄무늬 양', perm: '곱슬 양', knit: '니트 양', box: '상자 양', lambs: '아기 양 셋',
+  stilts: '롱다리 양', flat: '납작 양', ball: '동글 양', upside: '거꾸로 양', dj: '헤드폰 양',
+  umb: '우산 양', balloon: '풍선 양', robot: '로봇 양', long: '닥스훈트 양', disco: '반짝이 양',
+};
+
+/* sheep met so far: kept across nights, and remembered in this browser */
+const FOUND_KEY = 'sheeping-found';
+let found = new Set(), newName = '', newT = 0;
+function loadFound() {
+  try {
+    if (location.hash === '#fresh') localStorage.removeItem(FOUND_KEY);
+    const v = JSON.parse(localStorage.getItem(FOUND_KEY) || '[]');
+    if (Array.isArray(v)) found = new Set(v.filter(k => KINDS.includes(k)));
+  } catch (_) { found = new Set(); }
+}
+function meet(kind) {
+  const id = kind === 'scared' ? 'classic' : kind === 'lamb' ? 'lambs' : kind;
+  if (!KINDS.includes(id) || found.has(id)) return;
+  found.add(id);
+  newName = NAMES[id]; newT = 4;
+  if (forcedKind || endTest) return; /* test links don't count toward the real record */
+  try { localStorage.setItem(FOUND_KEY, JSON.stringify([...found])); } catch (_) {}
+}
 const MSG = '인간 한 명...';
 
 /* ---------- state ---------- */
@@ -335,6 +362,7 @@ function spawn(kind) {
   if (kind === 'rebel') exclusive = e;
   ents.push(e);
   lastSpawned = e;
+  meet(kind);
   return e;
 }
 
@@ -759,6 +787,7 @@ function update(dt) {
 
   dimShown += (dim - dimShown) * Math.min(1, dt * 1.5);
   flash = Math.max(0, flash - dt * 2.2);
+  newT = Math.max(0, newT - dt);
 }
 
 /* ---------- drawing to the grid ---------- */
@@ -872,7 +901,21 @@ function render() {
 
     ctx.fillStyle = DIM;
     ctx.globalAlpha = 0.5 * A;
-    ctx.fillText(`${night}번째 밤`, offX + cw, offY + chh * 0.5 + chh / 2);
+    const topY = offY + chh * 0.5 + chh / 2;
+    ctx.fillText(`${night}번째 밤`, offX + cw, topY);
+
+    /* top right: sheep met so far, and the newest one's name for a moment */
+    const rx = offX + cols * cw - cw;
+    ctx.textAlign = 'right';
+    const glow = Math.min(1, newT / 1.5);
+    ctx.fillStyle = glow > 0 ? FG : DIM;
+    ctx.globalAlpha = (0.5 + 0.45 * glow) * A;
+    ctx.fillText(`만난 양 ${found.size} / ${KINDS.length}`, rx, topY);
+    if (newT > 0 && newName) {
+      ctx.fillStyle = FG;
+      ctx.globalAlpha = Math.min(1, newT / 1.2) * 0.85 * A;
+      ctx.fillText(`+ ${newName}`, rx, topY + chh * 1.1);
+    }
   }
 
   if (flash > 0) {
@@ -916,6 +959,7 @@ window.addEventListener('hashchange', readHash);
 
 function start() {
   readHash();
+  loadFound();
   layout();
   resetNight();
   phase = 'dawn'; phaseT = 0;
