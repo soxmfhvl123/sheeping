@@ -1,0 +1,932 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>말 안 듣는 양들</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nanum+Gothic+Coding:wght@400;700&display=swap">
+<style>
+/* Layout: one full-bleed night. Everything is drawn as a monospace character grid on a single canvas. */
+:root{
+  --night:#05060a;   /* sky and ground */
+  --chalk:#e6e9f0;   /* sheep, fence, counting voice */
+  --dust:#7d8499;    /* stars, grass, clouds, traces */
+  --mono:"Nanum Gothic Coding", "D2Coding", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color-scheme:dark;
+}
+html{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html,body{height:100%}
+body{
+  margin:0;
+  box-sizing:border-box;
+  background:var(--night);
+  color:var(--chalk);
+  overflow:hidden;
+  cursor:none;
+  padding-block:0;
+  padding-left:max(16px, env(safe-area-inset-left, 0px));
+  padding-right:max(16px, env(safe-area-inset-right, 0px));
+}
+canvas{display:block;width:100%;height:100%}
+</style>
+</head>
+<body>
+<canvas id="night" role="img" aria-label="밤하늘 아래 울타리를 넘는 아스키 양들. 양마다 생김새와 넘는 방식이 다르고, 화면 아래에서 숫자를 센다."></canvas>
+
+<script>
+(() => {
+'use strict';
+
+/* ---------- setup ---------- */
+const cv = document.getElementById('night');
+const ctx = cv.getContext('2d');
+const rootCS = getComputedStyle(document.documentElement);
+const tok = (n, f) => (rootCS.getPropertyValue(n).trim() || f);
+const BG = tok('--night', '#05060a');
+const FG = tok('--chalk', '#e6e9f0');
+const DIM = tok('--dust', '#7d8499');
+const FONT = tok('--mono', 'monospace');
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+const rand = (a = 1, b) => (b === undefined ? Math.random() * a : a + Math.random() * (b - a));
+const ri = (a, b) => Math.floor(rand(a, b + 1));
+const pick = a => a[Math.floor(Math.random() * a.length)];
+
+/* ---------- drawings ---------- */
+const FENCE = [
+  "=+====+====+=",
+  " |    |    | ",
+  "=+====+====+=",
+  " |    |    | ",
+];
+const FENCE_OPQ = [true, false, true, false];
+const FW = 13;
+const JUMP_H = 7;
+
+const LEG_A = "  |  |", LEG_B = "  /  \\";
+const two = (top, a = LEG_A, b = LEG_B) => [[...top, a], [...top, b]];
+
+const SPR = {
+  /* 01-14 */
+  classic:  two([" .~~~~.", "(      )-o", " '~~~~'"]),
+  coward:   two([" .~~~~.  ;", "(      )-o", " '~~~~'"]),
+  sleep:    [[" .~~~~.", "(      )-_", " '======'"]],
+  startle:  two([" .~~~~.  !", "(      )-O", " '~~~~'"]),
+  shaved:   two([" .--.", "(    )-o", " '--'"], " |  |", " /  \\"),
+  big:      two(["  .~~~~~~~~~~.", " (            )", "(              )-o", " (            )", "  '~~~~~~~~~~'"], "      |  |", "      /  \\"),
+  rebel:    two([" .~~~~.", "(      )-8", " '~~~~'"]),
+  poleWalk: two([" .~~~~.", "(      )-o", " '~~~~'======="]),
+  poleRise: [[" .~~~~.", "(      )-o", " '~~~~'", "  \\  /"]],
+  selfie:   two([" .~~~~.", "(      )-o/", " '~~~~'"]),
+  math:     two([" .~~~~.", "(  π   )=o-o", " '~~~~'"]),
+  ghost:    two([" . . . .", ":       :-o", " ' . . '"], "  :  :", "  .  ."),
+  puff:     [["  .~~~~~.", " (       )~", "  '~~~~~'"]],
+  wolf:     two(["  .~~~~.  /\\", " (      )<'>", "  '~~~~'  vvv"], "~/ |  |", "~/ /  \\"),
+  front:    [[" .~~~~.", "( o  o )", " '~~~~'", "  |  |"]],
+  blink:    [[" .~~~~.", "( -  - )", " '~~~~'", "  |  |"]],
+  /* 15-29 */
+  stripe:   two([" .=====.", "(|||||||)-o", " '====='"]),
+  perm:     two([" .@@@@@.", "(@@@@@@@)-o", " '@@@@@'"]),
+  knit:     two([" .xxxxx.", "(x+x+x+x)-o", " 'xxxxx'"]),
+  box:      two([" +-----+", " |     |-o", " +-----+"], "   |  |", "   /  \\"),
+  lamb:     two([" .~~.", "(    )o", " '~~'"], "  ||", "  /\\"),
+  stilts:   [[" .~~~~.", "(      )-o", " '~~~~'", "  |  |", "  |  |", "  |  |", "  |  |", "  |  |"],
+             [" .~~~~.", "(      )-o", " '~~~~'", "  |  |", "  |  |", "  |  |", "  /  \\", " /    \\"]],
+  flat:     two([" .~~~~~~~~~~.", "(____________)-o"], " \"  \"    \"  \"", "  \"  \"  \"  \""),
+  ball:     [[" .~~.", "(   o)", " '~~'"], [" .~~.", "(    )", " 'o~'"], [" .~~.", "(o   )", " '~~'"], [" .o~.", "(    )", " '~~'"]],
+  upside:   [["  |  |", " .~~~~.", "(      )-o", " '~~~~'"], ["  \\  /", " .~~~~.", "(      )-o", " '~~~~'"]],
+  dj:       two([" .~~~~. .-.", "(      )(o)", " '~~~~'"]),
+  umb:      two(['   .-"-.', "  /_____\\", "     |", " .~~~|.", "(      )-o", " '~~~~'"]),
+  balloon:  two(["    .-.", "   (   )", "    '-'", "     |", " .~~~|.", "(      )-o", " '~~~~'"]),
+  robot:    two([" ._____.   T", "[|||||||]=[o]", " '-----'"], "  d   b", "  b   d"),
+  long:     two([" .~~~~~~~~~~~~~.", "(               )-o", " '~~~~~~~~~~~~~'"], "  |  |       |  |", "  /  \\       /  \\"),
+};
+function discoFrames() {
+  const sp = () => pick([' ', ' ', '*', '+', '.']);
+  const edge = () => (Math.random() < 0.3 ? '*' : '~');
+  const top = ' .' + Array.from({ length: 4 }, edge).join('') + '.';
+  const body = '(' + Array.from({ length: 6 }, sp).join('') + ')-o';
+  const bot = " '" + Array.from({ length: 4 }, edge).join('') + "'";
+  return two([top, body, bot]);
+}
+const CAR = [["(~~)-", " \"\""], ["(~~)-", " ''"]];
+const CAR_HEAD = [["(~~)-o", " \"\""], ["(~~)-o", " ''"]];
+const CLOUD = ["    .~~~.  .~~.", " .~(     )(    )~.", "(                 )", " '~~~~~~~~~~~~~~~'"];
+const WOOL = [" .~~~~~.", "(~~~~~~~)", " '~~~~~'"];
+const RAYS = ["\\ | /", " -*-", "/ | \\"];
+
+const MIR = { '(': ')', ')': '(', '/': '\\', '\\': '/', '<': '>', '>': '<', '[': ']', ']': '[' };
+const mirror = sp => {
+  const w = Math.max(...sp.map(s => s.length));
+  return sp.map(s => s.padEnd(w).split('').reverse().map(c => MIR[c] || c).join(''));
+};
+const REBEL_BACK = SPR.rebel.map(mirror);
+
+const GL = ['#', '%', '▒', '@', '&', '$', '¦', '?'];
+function corrupt(sp, n) {
+  const out = sp.map(s => s.split(''));
+  for (let k = 0; k < n; k++) {
+    const row = out[Math.floor(Math.random() * out.length)];
+    const idx = [];
+    row.forEach((c, i) => { if (c !== ' ') idx.push(i); });
+    if (idx.length) row[pick(idx)] = pick(GL);
+  }
+  return out.map(r => r.join(''));
+}
+function corruptNum(n) {
+  const s = String(n).split('');
+  s[ri(0, s.length - 1)] = pick(['#', '%', '▒', '?']);
+  if (s.length > 1 && Math.random() < 0.4) s[ri(0, s.length - 1)] = pick(['#', '▒']);
+  return s.join('');
+}
+function mathy(n) {
+  const o = [`√${n * n}`, `0x${n.toString(16).toUpperCase()}`, `${n * 2}÷2`, `${n - 1}+1`, `0b${n.toString(2)}`];
+  let f = 1;
+  for (let k = 1; k <= 6; k++) { f *= k; if (f === n) o.push(`${k}!`, `${k}!`); }
+  for (let a = 2; a * a <= n; a++) if (n % a === 0) { o.push(`${a}×${n / a}`); break; }
+  return pick(o);
+}
+
+/* ---------- who comes, how often ---------- */
+/* order = number in the plan (01..29); #s05 in the link shows only that sheep */
+const KINDS = ['classic', 'coward', 'sleepy', 'shaved', 'big', 'rebel', 'pole', 'selfie', 'math', 'train', 'ghost', 'cloud', 'wolf', 'glitch',
+  'stripe', 'perm', 'knit', 'box', 'lambs', 'stilts', 'flat', 'ball', 'upside', 'dj', 'umb', 'balloon', 'robot', 'long', 'disco'];
+const CALM = ['stripe', 'perm', 'knit', 'box'];
+const WEIGHT = {
+  calm: 42,                                                                          // 잔잔한 양 (정석 + 무늬 양)
+  coward: 6, sleepy: 5, shaved: 5,
+  big: 5, rebel: 5, pole: 5, selfie: 5, lambs: 5, stilts: 5, flat: 5, ball: 5, upside: 5, dj: 5,  // 가끔 튀는 양
+  math: 2, train: 2, ghost: 2, cloud: 2, umb: 2, balloon: 2, robot: 2, long: 2,                    // 드문 양
+  wolf: 1.2, glitch: 1.2, disco: 1.2,                                                              // 아주 드문 양
+};
+const calm = () => (Math.random() < 0.55 ? 'classic' : pick(CALM));
+const MSG = '인간 한 명...';
+
+/* ---------- state ---------- */
+let W, H, dpr, fs, cw, chh, cols, rows, groundY, fenceX, JE, offX, offY;
+let gch = [], gal, gco;
+let stars = [], grass = [], clouds = [], wools = [], ztraces = [];
+let ents = [], parts = [];
+let count = 0, ctrText = '', dim = 0, dimShown = 0, flash = 0, fade = 0;
+let night = 0, phase = 'dawn', phaseT = 0, stillT = 0;
+let spawnTimer = 2, lastSpawned = null, oddCooldown = 2, exclusive = null, fastLeft = 0;
+let forcedKind = null, endTest = false;
+
+function readHash() {
+  const h = location.hash;
+  const m = h.match(/^#s(\d{1,2})$/);
+  forcedKind = m ? (KINDS[+m[1] - 1] || null) : null;
+  endTest = h === '#end';
+}
+
+/* ---------- layout ---------- */
+function layout() {
+  dpr = Math.min(2, window.devicePixelRatio || 1);
+  W = cv.clientWidth; H = cv.clientHeight;
+  cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  fs = Math.max(10, Math.min(22, Math.min(W / 72, H / 30)));
+  ctx.font = `${fs}px ${FONT}`;
+  cw = ctx.measureText('M').width || fs * 0.6;
+  /* phones: fewer, bigger columns so the sheep stay readable */
+  if (W < 640) {
+    const ratio = cw / fs;
+    fs = Math.max(10, Math.min(22, W / (52 * ratio), H / 26));
+    ctx.font = `${fs}px ${FONT}`;
+    cw = ctx.measureText('M').width || fs * 0.6;
+  }
+  chh = Math.round(fs * 1.22);
+  cols = Math.max(40, Math.floor(W / cw));
+  rows = Math.max(24, Math.floor(H / chh));
+  /* tall phone screens: bring the ground up so the scene sits nearer the middle */
+  groundY = Math.min(rows - 5, Math.floor(rows * (H > W * 1.2 ? 0.62 : 0.74)));
+  fenceX = Math.floor(cols * 0.56);
+  JE = fenceX + FW + 5;
+  gch = new Array(cols * rows).fill(' ');
+  gal = new Float32Array(cols * rows);
+  gco = new Uint8Array(cols * rows);
+  offX = (W - cols * cw) / 2;
+  offY = (H - rows * chh) / 2;
+  makeStars(); makeGrass();
+  for (const c of clouds) c.r = Math.min(c.r, Math.max(3, groundY - JUMP_H - 9));
+  for (const w of wools) { w.x = fenceX - 3 + w.dx; w.r = groundY - 2 - w.dy; }
+}
+function makeStars() {
+  stars = [];
+  const skyB = Math.max(3, groundY - JUMP_H - 6);
+  const n = Math.floor(cols * skyB / 34);
+  for (let i = 0; i < n; i++) {
+    const base = pick(['.', '.', '.', '.', "'", '+', '*']);
+    stars.push({ c: ri(0, cols - 1), r: ri(0, skyB), base, alt: false, a: rand(0.35, 1) });
+  }
+}
+function makeGrass() {
+  grass = [];
+  for (let c = 0; c < cols; c++) {
+    if (Math.random() < 0.11) grass.push({ c, r: groundY + 1, ch: pick([',', '.', "'", '`']) });
+    if (Math.random() < 0.04) grass.push({ c, r: groundY + 2, ch: pick(['.', ',']) });
+  }
+}
+
+/* ---------- counting voice ---------- */
+function addOne() {
+  count = Math.floor(count) + 1;
+  ctrText = `양 ${count}마리...`;
+  dim = Math.min(1, dim + 0.0095);
+}
+const wake = a => { dim = Math.max(0, dim - a); };
+
+/* ---------- motion helpers ---------- */
+const jsOf = e => fenceX - e.w - 6;
+function arc(x, js) {
+  const t = (x - js) / (JE - js);
+  return (t <= 0 || t >= 1) ? 0 : JUMP_H * 4 * t * (1 - t);
+}
+function legs(e, moving, air) {
+  if (air) return e.frames[1] || e.frames[0];
+  if (!moving) return e.frames[0];
+  return e.frames[Math.floor(e.ft / 0.16) % e.frames.length];
+}
+function constrain(e, nx) {
+  const a = e.ahead;
+  if (!a || !a.alive || !a.blocking) return nx;
+  if (e.x >= jsOf(e)) return nx;
+  let lim = a.x - e.w - 3;
+  if (a.x < JE) lim = Math.min(lim, jsOf(e) - 0.001);
+  return Math.max(e.x, Math.min(nx, lim));
+}
+function stepNormal(e, dt, lim = Infinity, mul = 1) {
+  const js = jsOf(e);
+  const air = e.x >= js && e.x < JE;
+  let nx = e.x + e.speed * mul * (air ? 1.5 : 1) * dt;
+  if (!air) nx = Math.min(nx, Math.max(e.x, lim));
+  nx = constrain(e, nx);
+  const moved = nx > e.x + 1e-6;
+  e.x = nx; e.y = arc(e.x, js); e.ft += dt;
+  e.spr = legs(e, moved, e.y > 0.01);
+  if (!e.landed && e.x >= JE) { e.landed = true; return 'land'; }
+  return null;
+}
+function walkFlat(e, dt, lim = Infinity) {
+  let nx = Math.min(e.x + e.speed * dt, Math.max(e.x, lim));
+  nx = constrain(e, nx);
+  const moved = nx > e.x + 1e-6;
+  e.x = nx; e.y = 0; e.ft += dt;
+  e.spr = legs(e, moved, false);
+}
+const arcT = e => (e.x - jsOf(e)) / (JE - jsOf(e));
+function addPart(p) { p.max = p.life; parts.push(p); }
+
+/* ---------- spawning ---------- */
+function pickKind() {
+  if (forcedKind) return forcedKind;
+  if (fastLeft > 0) { fastLeft--; return 'scared'; }
+  if (oddCooldown > 0) { oddCooldown--; return calm(); }
+  let tot = 0;
+  for (const k in WEIGHT) tot += WEIGHT[k];
+  let r = Math.random() * tot;
+  for (const k in WEIGHT) {
+    r -= WEIGHT[k];
+    if (r <= 0) {
+      if (k === 'calm') return calm();
+      oddCooldown = ri(1, 2);
+      return k;
+    }
+  }
+  return 'classic';
+}
+function spawn(kind) {
+  if (kind === 'lambs') {
+    for (let i = 0; i < 3; i++) { const l = spawn('lamb'); l.x -= i * 9; l.lastLamb = i === 2; }
+    return lastSpawned;
+  }
+  const e = { kind, alive: true, blocking: true, landed: false, state: 'walk', t: 0, ft: Math.random(), y: 0, speed: 6, ahead: lastSpawned, a: 1, dir: 1 };
+  switch (kind) {
+    case 'scared': e.frames = SPR.coward; e.speed = 12; break;
+    case 'coward': e.frames = SPR.coward; e.tries = 0; break;
+    case 'shaved': e.frames = SPR.shaved; break;
+    case 'big': e.frames = SPR.big; e.speed = 4.5; break;
+    case 'rebel': e.frames = SPR.rebel; break;
+    case 'pole': e.frames = SPR.poleWalk; e.speed = 7; break;
+    case 'selfie': e.frames = SPR.selfie; break;
+    case 'math': e.frames = SPR.math; break;
+    case 'ghost': e.frames = SPR.ghost; e.speed = 5; e.flT = 0; e.opq = 0; break;
+    case 'wolf': e.frames = SPR.wolf; break;
+    case 'glitch': e.frames = SPR.classic; e.corT = 0; break;
+    case 'train': e.frames = null; e.w = 36; e.speed = 7; e.cy = new Array(7).fill(0); e.cl = new Array(7).fill(false); e.smokeT = 0; break;
+    case 'stripe': case 'perm': case 'knit': case 'box': e.frames = SPR[kind]; break;
+    case 'lamb': e.frames = SPR.lamb; e.behind = true; break;
+    case 'stilts': e.frames = SPR.stilts; e.speed = 4.5; e.opq = 3; break;
+    case 'flat': e.frames = SPR.flat; e.behind = true; break;
+    case 'ball': e.frames = SPR.ball; e.speed = 7; e.opq = 3; break;
+    case 'upside': e.frames = SPR.upside; e.opq = [false, true, true, true]; break;
+    case 'dj': e.frames = SPR.dj; e.nT = 0; break;
+    case 'umb': e.frames = SPR.umb; break;
+    case 'balloon': e.frames = SPR.balloon; e.speed = 5; break;
+    case 'robot': e.frames = SPR.robot; break;
+    case 'long': e.frames = SPR.long; e.speed = 5.5; break;
+    case 'disco': e.frames = discoFrames(); e.dT = 0; break;
+    default: e.frames = SPR.classic;
+  }
+  if (e.frames) { e.w = Math.max(...e.frames[0].map(s => s.length)); e.spr = e.frames[0]; }
+  e.x = -e.w - 1;
+  if (kind === 'rebel') exclusive = e;
+  ents.push(e);
+  lastSpawned = e;
+  return e;
+}
+
+/* ---------- each sheep's behavior ---------- */
+function upd(e, dt) {
+  switch (e.kind) {
+    case 'classic': case 'scared': case 'shaved':
+    case 'stripe': case 'perm': case 'knit': case 'box': {
+      if (e.kind === 'shaved') e.jx = Math.floor(e.ft / 0.06) % 2;
+      if (stepNormal(e, dt) === 'land') addOne();
+      break;
+    }
+    case 'math': {
+      if (stepNormal(e, dt) === 'land') { addOne(); ctrText = `양 ${mathy(count)}마리...`; }
+      break;
+    }
+    case 'wolf': {
+      if (stepNormal(e, dt) === 'land') {
+        addOne(); ctrText = `양 ${count}마리... 아니 잠깐`;
+        wake(0.15); fastLeft = 3;
+      }
+      break;
+    }
+    case 'robot': {
+      if (stepNormal(e, dt) === 'land') { addOne(); ctrText = `양 ${count}마리. 삐빅.`; }
+      break;
+    }
+    case 'long': {
+      if (stepNormal(e, dt) === 'land') { addOne(); ctrText = `양 ${count}마리... 한 마리 맞지?`; }
+      break;
+    }
+    case 'upside': {
+      if (stepNormal(e, dt) === 'land') {
+        addOne();
+        const s = String(count), r = s.split('').reverse().join('');
+        ctrText = r === s ? `양 ${s}마리... 거꾸로 해도 ${s}` : `양 ${r}마리... 아니 ${s}`;
+      }
+      break;
+    }
+    case 'disco': {
+      e.dT -= dt;
+      if (e.dT <= 0) {
+        e.dT = 0.15; e.frames = discoFrames();
+        if (Math.random() < 0.5)
+          addPart({ c: e.x + rand(-1, 10), r: groundY - 1 - e.y - rand(0, 4), ch: pick(['*', '+', '.']), vc: rand(-1, 1), vr: rand(-1, 0.5), life: 0.7, a: 0.9 });
+      }
+      if (stepNormal(e, dt) === 'land') { addOne(); ctrText = `양 ${count}마리 *반짝*`; wake(0.05); }
+      break;
+    }
+    case 'dj': {
+      const r = stepNormal(e, dt);
+      e.bob = e.y < 0.01 ? Math.floor(e.ft / 0.3) % 2 : 0;
+      e.nT -= dt;
+      if (e.nT <= 0) {
+        e.nT = 0.7;
+        addPart({ c: e.x + 10, r: groundY - 1 - e.y - 4, ch: '♪', vc: -0.4, vr: -1, life: 1.8, a: 0.85 });
+      }
+      if (r === 'land') { addOne(); ctrText = `양 ${count}마리 ♪`; }
+      break;
+    }
+    case 'umb': {
+      const air = e.x >= jsOf(e) && e.x < JE;
+      const desc = air && arcT(e) > 0.5;
+      const r = stepNormal(e, dt, Infinity, desc ? 0.33 : 1);
+      e.jx = desc ? Math.round(Math.sin(e.ft * 3)) : 0;
+      if (r === 'land') addOne();
+      break;
+    }
+    case 'ball': {
+      const r = stepNormal(e, dt);
+      e.spr = e.frames[((Math.floor(e.x * 0.9) % 4) + 4) % 4];
+      if (r === 'land') { addOne(); e.bt = 0; }
+      if (e.landed) { e.bt += dt; e.y = 2.2 * Math.abs(Math.sin(e.bt * 6)) * Math.exp(-e.bt * 1.6); }
+      break;
+    }
+    case 'lamb': {
+      const a = e.ahead;
+      let nx = e.x + e.speed * dt;
+      if (a && a.alive && a.blocking) nx = Math.max(e.x, Math.min(nx, a.x - e.w - 2));
+      const moved = nx > e.x + 1e-6;
+      e.x = nx; e.ft += dt; e.spr = legs(e, moved, false);
+      e.y = moved ? Math.floor(e.ft / 0.14) % 2 : 0;
+      if (!e.landed && e.x + 3 >= fenceX + 6) {
+        e.landed = true; addOne();
+        if (e.lastLamb) ctrText = `양 ${count}마리... 아기도 세나?`;
+      }
+      break;
+    }
+    case 'stilts': {
+      walkFlat(e, dt);
+      if (!e.landed && e.x + 4 >= fenceX + 6) { e.landed = true; addOne(); ctrText = `양 ${count}마리... 넘은 거 맞지?`; }
+      break;
+    }
+    case 'flat': {
+      const under = e.x + 14 > fenceX && e.x < fenceX + FW;
+      e.speed = under ? 2.5 : 6;
+      walkFlat(e, dt);
+      if (!e.landed && e.x >= fenceX) { e.landed = true; addOne(); ctrText = `양 ${count}마리... 밑으로?`; }
+      break;
+    }
+    case 'balloon': {
+      const js = jsOf(e), popX = fenceX + FW + 1;
+      if (e.state === 'walk') {
+        walkFlat(e, dt, js - 0.01);
+        if (e.x >= js - 0.02) e.state = 'rise';
+      } else if (e.state === 'rise') {
+        e.x += 3 * dt; e.ft += dt;
+        e.y = 9 * Math.min(1, (e.x - js) / (popX - js));
+        e.spr = e.frames[1];
+        if (e.x >= popX) {
+          e.state = 'drop'; e.vy = 0;
+          const top = groundY - 1 - e.y - 6;
+          addPart({ free: true, text: '펑', c: e.x + 5.5, r: top - 1, life: 1, a: 1 });
+          for (let k = 0; k < 6; k++)
+            addPart({ c: e.x + 5, r: top, ch: pick(['*', '.', "'"]), vc: rand(-4, 4), vr: rand(-3, 1), life: 0.6, a: 0.9 });
+          e.frames = SPR.classic; e.spr = SPR.classic[1];
+        }
+      } else if (e.state === 'drop') {
+        e.x += 3 * dt; e.vy += 35 * dt; e.y -= e.vy * dt;
+        if (e.y <= 0) { e.y = 0; e.landed = true; e.state = 'leave'; addOne(); ctrText = `양 ${count}마리... 풍선은?`; }
+      } else {
+        e.x += e.speed * dt; e.ft += dt; e.spr = legs(e, true, false);
+      }
+      break;
+    }
+    case 'coward': {
+      if (e.state === 'walk') {
+        const js = jsOf(e);
+        const r = stepNormal(e, dt, e.tries < 2 ? js - 0.01 : Infinity);
+        if (r === 'land') addOne();
+        if (e.tries < 2 && e.x >= js - 0.02) {
+          e.state = 'freeze'; e.t = 0;
+          if (e.tries === 0) ctrText = `양 ${Math.floor(count) + 1}...`;
+        }
+      } else if (e.state === 'freeze') {
+        e.t += dt; e.spr = e.frames[0];
+        if (e.t > 0.7 + 0.25 * e.tries) { e.state = 'back'; e.backTo = e.x - (4 - e.tries); }
+      } else {
+        e.x -= 4 * dt; e.ft += dt; e.spr = legs(e, true, false);
+        if (e.x <= e.backTo) { e.tries++; e.state = 'walk'; }
+      }
+      break;
+    }
+    case 'sleepy': {
+      if (e.state === 'walk') {
+        walkFlat(e, dt, jsOf(e) - 0.01);
+        if (e.x >= jsOf(e) - 0.02) {
+          e.state = 'sleep'; e.t = 0; e.dur = rand(6, 9); e.zT = 0; e.repT = 0; e.reps = 1;
+          e.n1 = Math.floor(count) + 1; ctrText = `양 ${e.n1}...`;
+        }
+      } else if (e.state === 'sleep') {
+        e.t += dt; e.zT -= dt; e.repT += dt; e.spr = SPR.sleep[0];
+        if (e.zT <= 0) {
+          e.zT = 0.9;
+          addPart({
+            c: e.x + 9, r: groundY - 4, ch: pick(['z', 'Z']), vc: 0.5, vr: -1.1, life: 3.2, a: 0.9,
+            onDeath: p => {
+              if (Math.random() < 0.35 && ztraces.length < 14 && p.r > 1)
+                ztraces.push({ c: Math.round(p.c), r: Math.round(p.r), ch: p.ch });
+            },
+          });
+        }
+        if (e.repT > 1.8 && e.reps < 4) { e.repT = 0; e.reps++; ctrText += ` ${e.n1}...`; }
+        if (e.t > e.dur) { e.state = 'startle'; e.t = 0; }
+      } else if (e.state === 'startle') {
+        e.t += dt; e.spr = SPR.startle[0];
+        if (e.t > 0.6) { e.state = 'go'; e.frames = SPR.startle; e.speed = 9; }
+      } else {
+        if (stepNormal(e, dt) === 'land') addOne();
+      }
+      break;
+    }
+    case 'big': {
+      if (e.state === 'walk') {
+        const lim = fenceX - 14;
+        walkFlat(e, dt, lim);
+        if (e.x >= lim - 0.02) { e.state = 'stuck'; e.t = 0; e.pT = 0; }
+      } else if (e.state === 'stuck') {
+        e.t += dt; e.pT -= dt; e.spr = e.frames[0];
+        e.jx = e.t < 1.8 ? (Math.floor(e.t / 0.08) % 2 ? 1 : -1) : 0;
+        if (e.pT <= 0) {
+          e.pT = 0.12;
+          addPart({ c: e.x + rand(2, 14), r: groundY - 6 + rand(0, 2), ch: pick(['~', "'", '.']), vc: rand(-2, 2), vr: rand(-1.5, -0.4), life: 0.8, a: 0.8 });
+        }
+        if (e.t > 2.2) {
+          const dy = wools.length % 2, dx = ri(0, 3);
+          wools.push({ x: fenceX - 3 + dx, r: groundY - 2 - dy, dx, dy });
+          if (wools.length > 4) wools.shift();
+          e.kind = 'shaved'; e.frames = SPR.shaved; e.w = 8; e.speed = 6; e.jx = 0;
+          e.x = jsOf(e); e.state = 'walk';
+        }
+      }
+      break;
+    }
+    case 'rebel': {
+      if (e.state === 'walk') {
+        walkFlat(e, dt, jsOf(e) - 3);
+        if (e.x >= jsOf(e) - 3.02) { e.state = 'pause'; e.t = 0; addOne(); }
+      } else if (e.state === 'pause') {
+        e.t += dt; e.spr = e.frames[0];
+        if (e.t > 1.3) {
+          e.state = 'back'; e.frames = REBEL_BACK; e.dir = -1;
+          const n = count; count = n - 1;
+          ctrText = `양 ${n}마리... ${n - 1}마리?`;
+          wake(0.08);
+        }
+      } else {
+        e.x -= 6 * dt; e.ft += dt; e.spr = legs(e, true, false);
+        if (e.x < -e.w - 2) { e.alive = false; exclusive = null; }
+      }
+      break;
+    }
+    case 'pole': {
+      if (e.state === 'walk') {
+        const lim = fenceX - 14;
+        walkFlat(e, dt, lim);
+        if (e.x >= lim - 0.02) {
+          e.state = 'plant'; e.t = 0; e.plantX = Math.round(e.x) + 13;
+          e.spr = SPR.poleRise[0]; e.vy = 3;
+        }
+      } else if (e.state === 'plant') {
+        e.t += dt;
+        if (e.t > 0.35) { e.vy += 60 * dt; e.y += e.vy * dt; }
+        if (groundY - 1 - e.y < -4) { e.state = 'away'; e.t = 0; e.blocking = false; e.wait = rand(3, 5); }
+      } else if (e.state === 'away') {
+        e.t += dt;
+        if (e.t > e.wait) {
+          e.state = 'fall'; e.x = Math.min(cols - 12, JE + ri(1, 10));
+          e.y = groundY + 4; e.vy = 0; e.frames = SPR.classic; e.spr = e.frames[1];
+        }
+      } else if (e.state === 'fall') {
+        e.vy += 45 * dt; e.y -= e.vy * dt;
+        if (e.y <= 0) {
+          e.y = 0; e.landed = true; addOne(); e.state = 'leave';
+          for (let k = 0; k < 6; k++)
+            addPart({ c: e.x + 4, r: groundY - 1, ch: pick(['.', "'", ',']), vc: (k % 2 ? 1 : -1) * rand(2, 6), vr: -rand(0, 1.2), life: 0.6, a: 0.9 });
+          addPart({ free: true, text: '쿵', c: e.x + 4.5, r: groundY - 6, vr: -0.6, life: 1.1, a: 0.9 });
+        }
+      } else {
+        e.x += e.speed * dt; e.ft += dt; e.spr = legs(e, true, false);
+      }
+      break;
+    }
+    case 'selfie': {
+      if (e.state === 'walk') {
+        if (stepNormal(e, dt) === 'land') addOne();
+        if (!e.posed && e.y > 0 && arcT(e) >= 0.5) {
+          e.state = 'pose'; e.t = 0;
+          flash = reduce ? 0.15 : 0.9; wake(0.4);
+          addPart({ free: true, text: '*찰칵*', c: e.x + 9.5, r: groundY - 1 - e.y - 7, life: 1.3, a: 1 });
+        }
+      } else {
+        e.t += dt; e.spr = e.frames[1];
+        if (e.t > 1.1) { e.state = 'walk'; e.posed = true; }
+      }
+      break;
+    }
+    case 'cloud': {
+      if (e.state === 'walk') {
+        stepNormal(e, dt);
+        if (e.y > 0 && arcT(e) >= 0.5) {
+          e.state = 'float'; e.t = 0; e.blocking = false;
+          e.tgt = ri(3, Math.max(4, groundY - JUMP_H - 9));
+        }
+      } else {
+        e.t += dt; e.y += 2.6 * dt; e.x += 1.6 * dt;
+        e.spr = e.t < 0.7 ? e.frames[1] : SPR.puff[0];
+        const br = groundY - 1 - e.y;
+        if (br <= e.tgt) {
+          clouds.push({ x: e.x - 4, r: Math.round(br), v: rand(0.15, 0.4) });
+          if (clouds.length > 6) clouds.shift();
+          addOne(); e.alive = false;
+        }
+      }
+      break;
+    }
+    case 'ghost': {
+      walkFlat(e, dt);
+      e.flT -= dt;
+      if (e.flT <= 0) { e.a = Math.random() < 0.15 ? 0 : rand(0.25, 0.6); e.flT = rand(0.05, 0.18); }
+      if (!e.half && e.x + 5 >= fenceX + 6) {
+        e.half = true; e.landed = true;
+        count = Math.floor(count) + 0.5;
+        ctrText = `양 ${count.toFixed(1)}마리...`;
+        dim = Math.min(1, dim + 0.005);
+      }
+      break;
+    }
+    case 'glitch': {
+      e.corT -= dt;
+      if (e.state === 'walk') {
+        walkFlat(e, dt, jsOf(e) - 0.01);
+        if (e.x >= jsOf(e) - 0.02) { e.state = 'tp'; e.t = 0; e.tpFrom = e.x; }
+      } else if (e.state === 'tp') {
+        e.t += dt; e.spr = e.frames[0];
+        if (e.t > 0.9) {
+          e.x = JE; e.landed = true; e.state = 'out';
+          addOne(); ctrText = `양 ${corruptNum(count)}마리...`;
+        }
+      } else {
+        e.x += e.speed * dt; e.ft += dt; e.spr = legs(e, true, false);
+      }
+      if (e.corT <= 0) {
+        e.cor = corrupt(e.spr, ri(1, 3)); e.corT = 0.09;
+        e.slip = Math.random() < 0.15 ? (Math.random() < 0.5 ? -1 : 1) : 0;
+      }
+      break;
+    }
+    case 'train': {
+      e.x = constrain(e, e.x + e.speed * dt);
+      e.ft += dt; e.smokeT -= dt;
+      for (let i = 0; i < 7; i++) {
+        const cx = e.x + i * 5;
+        e.cy[i] = arc(cx, fenceX - 11);
+        if (!e.cl[i] && cx >= JE) { e.cl[i] = true; addOne(); }
+      }
+      if (e.cl[6] && e.cl[0]) e.landed = true;
+      if (e.smokeT <= 0 && e.x + 34 > 0) {
+        e.smokeT = 0.45;
+        addPart({ c: e.x + 34.5, r: groundY - 3 - e.cy[6], ch: pick(['o', 'O', '.']), vc: -1, vr: -1.4, life: 2.2, a: 0.7, dim: true });
+      }
+      break;
+    }
+    case 'chorus': {
+      if (e.x < e.target) {
+        e.x = Math.min(e.target, e.x + 5 * dt); e.ft += dt; e.spr = legs(e, true, false);
+      } else e.spr = e.frames[0];
+      if (phase !== 'chorus') {
+        e.blT -= dt; e.blinking -= dt;
+        if (e.blT <= 0) { e.blinking = 0.15; e.blT = rand(1.5, 4); }
+        e.spr = e.blinking > 0 ? SPR.blink[0] : SPR.front[0];
+      }
+      break;
+    }
+  }
+  if (e.alive && e.dir === 1 && e.state !== 'away' && e.x > cols + 1) e.alive = false;
+}
+
+/* ---------- the end of the night ---------- */
+function startChorus() {
+  const targets = [];
+  for (let p = 3; p <= fenceX - 12; p += 12) targets.push(p);
+  const n = targets.length;
+  for (let i = 0; i < n; i++) {
+    ents.push({
+      kind: 'chorus', alive: true, blocking: false, frames: SPR.classic, spr: SPR.classic[0],
+      w: 10, x: -10 - i * 12, y: 0, ft: Math.random(), dir: 0, target: targets[n - 1 - i],
+      blT: rand(0.5, 3), blinking: 0, a: 1,
+    });
+  }
+}
+function resetNight() {
+  night++;
+  count = endTest ? 96 : 0;
+  ctrText = ''; dim = 0; dimShown = 0; flash = 0;
+  ents = []; parts = []; clouds = []; wools = []; ztraces = [];
+  spawnTimer = 1.5; lastSpawned = null; oddCooldown = 2; exclusive = null; fastLeft = 0;
+  makeStars(); makeGrass();
+}
+
+/* ---------- update ---------- */
+function update(dt) {
+  phaseT += dt;
+  switch (phase) {
+    case 'dawn':
+      fade = Math.min(1, phaseT / 3);
+      if (phaseT >= 3) { phase = 'night'; phaseT = 0; }
+      break;
+    case 'drain':
+      if (!ents.length || phaseT > 30) {
+        ents = []; exclusive = null; startChorus(); phase = 'chorus'; phaseT = 0; stillT = 0;
+      }
+      break;
+    case 'chorus':
+      if (ents.every(e => e.x >= e.target - 0.01)) {
+        stillT += dt;
+        if (stillT > 1.2) { phase = 'stare'; phaseT = 0; }
+      }
+      break;
+    case 'stare':
+      if (phaseT > 2.4) { phase = 'speak'; phaseT = 0; ctrText = ''; }
+      break;
+    case 'speak': {
+      ctrText = MSG.slice(0, Math.min(MSG.length, Math.floor(phaseT / 0.2)));
+      if (phaseT > MSG.length * 0.2 + 3.5) { phase = 'fade'; phaseT = 0; }
+      break;
+    }
+    case 'fade':
+      fade = Math.max(0, 1 - phaseT / 6);
+      if (phaseT >= 6) { phase = 'black'; phaseT = 0; }
+      break;
+    case 'black':
+      fade = 0;
+      if (phaseT >= 4) { resetNight(); phase = 'dawn'; phaseT = 0; }
+      break;
+  }
+
+  if (phase === 'night') {
+    if (Math.floor(count) >= 100) { phase = 'drain'; phaseT = 0; }
+    else {
+      spawnTimer -= dt;
+      const waiting = ents.filter(e => e.alive && e.blocking && !e.landed).length;
+      const clear = !lastSpawned || !lastSpawned.alive || !lastSpawned.blocking || lastSpawned.x > 3;
+      if (spawnTimer <= 0 && !exclusive && clear && waiting < 4) {
+        spawn(pickKind());
+        spawnTimer = rand(3, 5.6);
+      }
+    }
+  }
+
+  for (const e of ents) if (e.alive) upd(e, dt);
+  ents = ents.filter(e => e.alive);
+
+  for (const p of parts) {
+    p.c += (p.vc || 0) * dt; p.r += (p.vr || 0) * dt; p.life -= dt;
+    if (p.life <= 0 && p.onDeath) p.onDeath(p);
+  }
+  parts = parts.filter(p => p.life > 0);
+
+  for (const c of clouds) { c.x += c.v * dt; if (c.x > cols + 1) c.x = -20; }
+  for (const s of stars) if (Math.random() < dt * 0.2) s.alt = !s.alt;
+
+  dimShown += (dim - dimShown) * Math.min(1, dt * 1.5);
+  flash = Math.max(0, flash - dt * 2.2);
+}
+
+/* ---------- drawing to the grid ---------- */
+function put(c, r, ch, a = 1, col = 0) {
+  if (c < 0 || r < 0 || c >= cols || r >= rows) return;
+  const i = r * cols + c;
+  gch[i] = ch; gal[i] = a; gco[i] = col;
+}
+function stamp(sp, x, bottomRow, a = 1, opaqueRows = sp.length - 1, col = 0) {
+  x = Math.round(x); bottomRow = Math.round(bottomRow);
+  const h = sp.length;
+  for (let i = 0; i < h; i++) {
+    const line = sp[i], r = bottomRow - (h - 1 - i);
+    if (r < 0 || r >= rows) continue;
+    let first = -1, last = -1;
+    for (let k = 0; k < line.length; k++) if (line[k] !== ' ') { if (first < 0) first = k; last = k; }
+    if (first < 0) continue;
+    const opaque = Array.isArray(opaqueRows) ? !!opaqueRows[i] : i < opaqueRows;
+    for (let k = first; k <= last; k++) {
+      const ch = line[k];
+      if (ch === ' ' && !opaque) continue;
+      put(x + k, r, ch, a, col);
+    }
+  }
+}
+function line(x0, y0, x1, y1) {
+  const dx = x1 - x0, dy = y1 - y0, n = Math.max(Math.abs(dx), Math.abs(dy)) || 1;
+  const s = dx === 0 ? 99 : Math.abs(dy / dx);
+  const ch = s > 2 ? '|' : s < 0.4 ? '_' : (dx * dy > 0 ? '\\' : '/');
+  for (let i = 0; i <= n; i++) put(Math.round(x0 + dx * i / n), Math.round(y0 + dy * i / n), ch);
+}
+const TW = { '.': '+', "'": '.', '+': '*', '*': '+' };
+
+function drawEnt(e) {
+  const br = groundY - 1 - Math.round(e.y);
+  if (e.kind === 'train') {
+    for (let i = 0; i < 7; i++) {
+      const fr = (i === 6 ? CAR_HEAD : CAR)[(Math.floor(e.ft / 0.14) + i) % 2];
+      stamp(fr, e.x + i * 5, groundY - 1 - Math.round(e.cy[i]), 1, 1);
+    }
+    return;
+  }
+  if (e.kind === 'glitch') {
+    const sp = e.cor || e.spr;
+    if (e.state === 'tp') {
+      if (Math.random() < 0.6) stamp(sp, e.tpFrom + (Math.random() < 0.3 ? 1 : 0), br, rand(0.3, 1));
+      if (Math.random() < 0.6) stamp(corrupt(sp, 2), JE, groundY - 1, rand(0.3, 1));
+      return;
+    }
+    stamp(sp, e.x + (e.slip || 0), br);
+    return;
+  }
+  if (e.kind === 'pole') {
+    if (e.state === 'plant') {
+      if (e.y < 7) line(Math.round(e.x) + 10, br - 1, e.plantX, groundY - 1);
+      else stamp(["========"], e.plantX - 8, groundY - 1, 0.8, 0);
+    }
+    if (e.state === 'away') { if (e.t < 1.5) stamp(["========"], e.plantX - 8, groundY - 1, 0.8, 0); return; }
+  }
+  if (e.kind === 'selfie' && e.state === 'pose') stamp(RAYS, e.x + 7, br - 3, 1, 0);
+  if (!e.spr || e.a <= 0) return;
+  const opq = e.opq !== undefined ? e.opq : e.spr.length - 1;
+  stamp(e.spr, e.x + (e.jx || 0), br - (e.bob || 0), e.a, opq);
+}
+
+function render() {
+  gch.fill(' '); gal.fill(1); gco.fill(0);
+
+  for (const s of stars) put(s.c, s.r, s.alt ? (TW[s.base] || s.base) : s.base, s.a, 1);
+  for (const c of clouds) stamp(CLOUD, c.x, c.r, 0.6, CLOUD.length, 1);
+  for (const z of ztraces) put(z.c, z.r, z.ch, 0.45, 1);
+  for (let c = 0; c < cols; c++) put(c, groundY, '_', 0.9, 0);
+  for (const g of grass) put(g.c, g.r, g.ch, 0.7, 1);
+  for (const e of ents) if (e.behind) drawEnt(e);
+  stamp(FENCE, fenceX, groundY - 1, 1, FENCE_OPQ);
+  for (const w of wools) stamp(WOOL, w.x, w.r, 1, WOOL.length);
+  for (const e of ents) if (!e.behind) drawEnt(e);
+  for (const p of parts) if (!p.free) put(Math.round(p.c), Math.round(p.r), p.ch, (p.a || 1) * Math.max(0, p.life / p.max), p.dim ? 1 : 0);
+
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = BG;
+  ctx.fillRect(0, 0, W, H);
+
+  const A = (1 - 0.7 * dimShown) * fade;
+  if (A > 0.001) {
+    ctx.font = `${fs}px ${FONT}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    let cur = -1;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const i = r * cols + c, ch = gch[i];
+        if (ch === ' ') continue;
+        if (gco[i] !== cur) { cur = gco[i]; ctx.fillStyle = cur ? DIM : FG; }
+        ctx.globalAlpha = gal[i] * A;
+        ctx.fillText(ch, offX + c * cw + cw / 2, offY + r * chh + chh / 2);
+      }
+    }
+    ctx.fillStyle = FG;
+    for (const p of parts) {
+      if (!p.free) continue;
+      ctx.globalAlpha = (p.a || 1) * Math.max(0, p.life / p.max) * A;
+      ctx.fillText(p.text, offX + p.c * cw, offY + p.r * chh + chh / 2);
+    }
+
+    ctx.textAlign = 'left';
+    ctx.globalAlpha = 0.92 * A;
+    const tw = ctx.measureText(ctrText).width;
+    const tx = Math.max(offX + cw, Math.min(offX + fenceX * cw, W - tw - cw));
+    ctx.fillText(ctrText, tx, offY + (groundY + 3) * chh + chh / 2);
+
+    ctx.fillStyle = DIM;
+    ctx.globalAlpha = 0.5 * A;
+    ctx.fillText(`${night}번째 밤`, offX + cw, offY + chh * 0.5 + chh / 2);
+  }
+
+  if (flash > 0) {
+    ctx.globalAlpha = flash * fade;
+    ctx.fillStyle = FG;
+    ctx.fillRect(0, 0, W, H);
+  }
+  ctx.globalAlpha = 1;
+}
+
+/* ---------- loop ---------- */
+let last = performance.now(), acc = 1;
+function frame(now) {
+  const dt = Math.min(0.1, (now - last) / 1000);
+  last = now;
+  update(dt);
+  acc += dt;
+  if (acc >= 1 / 24) { acc = 0; render(); }
+  requestAnimationFrame(frame);
+}
+
+/* keep the screen awake while the piece is showing */
+let lock = null;
+async function keepAwake() {
+  try { if (navigator.wakeLock && document.visibilityState === 'visible') lock = await navigator.wakeLock.request('screen'); }
+  catch (_) { /* not allowed here; the piece still runs */ }
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') keepAwake(); });
+
+/* double-click for fullscreen, where the viewer allows it */
+document.addEventListener('dblclick', () => {
+  try {
+    const p = document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+    if (p && p.catch) p.catch(() => {});
+  } catch (_) {}
+});
+
+let resizeT = null;
+window.addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(layout, 120); });
+window.addEventListener('hashchange', readHash);
+
+function start() {
+  readHash();
+  layout();
+  resetNight();
+  phase = 'dawn'; phaseT = 0;
+  keepAwake();
+  requestAnimationFrame(t => { last = t; requestAnimationFrame(frame); });
+}
+const fontReady = (document.fonts && document.fonts.load)
+  ? Promise.race([document.fonts.load(`16px "Nanum Gothic Coding"`), new Promise(r => setTimeout(r, 2500))]).catch(() => {})
+  : Promise.resolve();
+fontReady.then(start);
+})();
+</script>
+</body>
+</html>
